@@ -87,6 +87,27 @@ class Tests(unittest.TestCase):
         self.assertEqual(settings['public_key'], self.settings['public_key'])
         self.assertEqual(config, self.config)
 
+    def test_legacy_links_are_owner_only(self):
+        legacy = 'vless://legacy-test-only@192.0.2.1:443#Original'
+        self.settings['owner_legacy_links'] = [legacy]
+        self.assertNotIn(legacy, self.message(2, '/vless'))
+        self.owner()
+        self.assertIn(legacy, self.message(1, '/vless'))
+        self.assertIsNone(self.message(1, '/vless', 'group'))
+        code = self.message(1, '/invite 30').split('start=')[1]
+        self.message(2, '/start ' + code)
+        response = self.message(2, '/vless')
+        self.assertNotIn(legacy, response)
+        user = self.service.db.execute('SELECT * FROM users WHERE id=2').fetchone()
+        self.assertIn(user['uuid'], response)
+        self.message(1, '/revoke 2')
+        self.assertNotIn('vless://', self.message(2, '/vless'))
+
+    def test_owner_without_legacy_receives_own_links(self):
+        self.owner()
+        response = self.message(1, '/vless')
+        self.assertEqual(response.count('vless://'), 2)
+
     def test_duplicate_update_does_not_extend_twice(self):
         self.owner()
         message = {'from': {'id': 1}, 'chat': {'type': 'private', 'id': 1}, 'text': '/extend 1 30'}

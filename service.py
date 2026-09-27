@@ -131,6 +131,7 @@ class Service:
         until = datetime.datetime.fromtimestamp(user['expires'], datetime.timezone.utc).strftime('%d.%m.%Y %H:%M UTC')
         return ('Доступ до ' + until + '\n\nHapp / Hiddify / v2rayNG:\n' + base +
                 '\n\nFlClash (импорт по URL, режим Rule):\n' + base + '/clash' +
+                '\n\n/vless — прямые VLESS-ссылки (для владельца — также прежние личные профили).'
                 '\n\nСсылки личные: не публикуйте их. Сначала попробуйте профиль NL-XHTTP.')
 
     def handle(self, message, update_id=None):
@@ -176,6 +177,13 @@ class Service:
                     return self.links(self.db.execute('SELECT * FROM users WHERE id=?', (uid,)).fetchone())
             user = self.db.execute('SELECT * FROM users WHERE id=?', (uid,)).fetchone()
             admin = owner == str(uid)
+            if command == '/vless':
+                if admin and self.settings.get('owner_legacy_links'):
+                    return 'Прежние личные VLESS-ссылки владельца:\n\n' + '\n\n'.join(self.settings['owner_legacy_links'])
+                if user and user['expires'] > time.time():
+                    self.sync()
+                    return 'Ваши личные VLESS-ссылки:\n\n' + base64.b64decode(render_subscription(self.settings, user)).decode()
+                return 'Нет активного доступа. Попросите владельца выдать приглашение.'
             if command in ('/start', '/my', '/status'):
                 if user and user['expires'] > time.time():
                     self.sync()
@@ -208,8 +216,8 @@ class Service:
                                         (max(int(time.time()), row['expires']) + days * 86400, target))
                     self.sync()
                     return 'Готово. Пользователь может получить актуальную ссылку командой /my.'
-                return '/my — подписка\n/invite 30 — приглашение на 30 дней\n/users — ID и сроки\n/extend ID 30 — продлить\n/revoke ID — отозвать и сменить ключи'
-            return '/my — ваша подписка\n/status — срок действия. Доступ выдаёт владелец.'
+                return '/my — подписка\n/vless — прежние личные VLESS-ссылки\n/invite 30 — приглашение на 30 дней\n/users — ID и сроки\n/extend ID 30 — продлить\n/revoke ID — отозвать и сменить ключи'
+            return '/my — ваша подписка\n/vless — ваши прямые ссылки\n/status — срок действия. Доступ выдаёт владелец.'
 
     def subscription(self, token, clash=False):
         with self.lock:
