@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+.env*
+!.env.example
+state/
+secrets/
+backups/
+generated/
+*.sqlite*
+*.pem
+id_ed25519*
+app.json
+*-token.txt

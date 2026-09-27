@@ -1,0 +1,20 @@
+[Unit]
+Description=Private VPN Telegram bot and subscriptions
+After=network-online.target xray.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/vpn-service/service.py /etc/vpn-service/app.json
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/vpn-service /usr/local/etc/xray
+
+[Install]
+WantedBy=multi-user.target
