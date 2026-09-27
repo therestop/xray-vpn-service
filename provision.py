@@ -45,7 +45,7 @@ def generate(server, token, config=None):
             raise ValueError('Inbound REALITY parameters must match')
     key = X25519PrivateKey.from_private_bytes(base64.urlsafe_b64decode(reality['privateKey'] + '=' * (-len(reality['privateKey']) % 4)))
     public = encode(key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw))
-    settings = {'server': server, 'bot_token': token, 'bot_username': '',
+    settings = {'server': server, 'bot_token': token, 'bot_username': '', 'location_label': '🇳🇱 Нидерланды',
                 'bootstrap_code': secrets.token_urlsafe(24), 'database': '/var/lib/vpn-service/state.sqlite',
                 'xray_config': '/usr/local/etc/xray/config.json', 'subscription_base': f'https://{server}:9443',
                 'sni': reality['serverNames'][0], 'public_key': public, 'short_id': reality['shortIds'][0],

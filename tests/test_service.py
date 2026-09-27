@@ -3,9 +3,10 @@ import json
 import tempfile
 import time
 import unittest
+from urllib.parse import urlsplit, unquote
 from pathlib import Path
 from unittest.mock import patch
-from service import Service, reconciled_config, render_subscription
+from service import BRAND, Service, branded_link, reconciled_config, render_subscription
 from provision import generate
 
 
@@ -90,14 +91,14 @@ class Tests(unittest.TestCase):
     def test_legacy_links_are_owner_only(self):
         legacy = 'vless://legacy-test-only@192.0.2.1:443#Original'
         self.settings['owner_legacy_links'] = [legacy]
-        self.assertNotIn(legacy, self.message(2, '/vless'))
+        self.assertNotIn(legacy.split('#')[0], self.message(2, '/vless'))
         self.owner()
-        self.assertIn(legacy, self.message(1, '/vless'))
+        self.assertIn(legacy.split('#')[0], self.message(1, '/vless'))
         self.assertIsNone(self.message(1, '/vless', 'group'))
         code = self.message(1, '/invite 30').split('start=')[1]
         self.message(2, '/start ' + code)
         response = self.message(2, '/vless')
-        self.assertNotIn(legacy, response)
+        self.assertNotIn(legacy.split('#')[0], response)
         user = self.service.db.execute('SELECT * FROM users WHERE id=2').fetchone()
         self.assertIn(user['uuid'], response)
         self.message(1, '/revoke 2')
@@ -107,6 +108,33 @@ class Tests(unittest.TestCase):
         self.owner()
         response = self.message(1, '/vless')
         self.assertEqual(response.count('vless://'), 2)
+
+    def test_menu_buttons_preserve_authorization(self):
+        self.owner()
+        self.assertIn('Пригласить', str(self.service.keyboard(1)))
+        self.assertNotIn('Пригласить', str(self.service.keyboard(2)))
+        self.message(2, '🎁 Пригласить на 30 дней')
+        self.assertEqual(self.service.db.execute('SELECT count(*) FROM invites').fetchone()[0], 0)
+        self.assertIn('start=', self.message(1, '🎁 Пригласить на 30 дней'))
+        self.assertIn(BRAND, self.message(1, '/start'))
+        self.assertNotIn('https://', self.message(1, '📅 Мой доступ'))
+        self.assertIn('/u/', self.message(1, '🔌 Подключить VPN'))
+
+    def test_branding_keeps_credentials_and_clash_references(self):
+        legacy = 'vless://test-user@192.0.2.1:8443?type=xhttp&path=%2Fabc#Old'
+        new = branded_link(self.settings, legacy)
+        self.assertEqual(new.split('#')[0], legacy.split('#')[0])
+        self.assertEqual(unquote(urlsplit(new).fragment), 'Skachkov VPN | 🇳🇱 Нидерланды | Основной')
+        links = base64.b64decode(render_subscription(self.settings, {'uuid': 'test'})).decode().splitlines()
+        for link in links:
+            self.assertIn('🇳🇱 Нидерланды', unquote(urlsplit(link).fragment))
+        payload = render_subscription(self.settings, {'uuid': 'test'}, True)
+        self.assertIn('🇳🇱'.encode('utf-8'), payload)
+        self.assertNotIn(b'\\ud83c', payload)
+        clash = json.loads(payload)
+        self.assertEqual(clash['proxy-groups'][0]['name'], BRAND)
+        self.assertEqual(clash['rules'][-1], 'MATCH,' + BRAND)
+        self.assertEqual(clash['dns']['nameserver'][0].split('#')[1], BRAND)
 
     def test_duplicate_update_does_not_extend_twice(self):
         self.owner()

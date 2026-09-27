@@ -15,12 +15,34 @@ import urllib.request
 import urllib.parse
 import uuid
 
+BRAND = 'Skachkov VPN'
+BUTTONS = {'🔌 Подключить VPN': '/my', '🔑 VLESS-ссылки': '/vless',
+           '📅 Мой доступ': '/status', '🌍 Локации': '/locations',
+           '📖 Как подключиться': '/guide', '🏠 Главное меню': '/menu',
+           '🎁 Пригласить на 30 дней': '/invite 30', '👥 Пользователи': '/users',
+           '⚙️ Управление доступом': '/admin'}
+
+
+def location(settings):
+    return settings.get('location_label', '🇳🇱 Нидерланды')
+
+
+def profile_name(settings, network):
+    variant = 'Основной' if network == 'xhttp' else 'Резервный'
+    return f'{BRAND} | {location(settings)} | {variant}'
+
+
+def branded_link(settings, link):
+    parsed = urllib.parse.urlsplit(link)
+    network = urllib.parse.parse_qs(parsed.query).get('type', ['tcp'])[0]
+    return link.split('#', 1)[0] + '#' + urllib.parse.quote(profile_name(settings, network), safe='')
+
 
 def render_subscription(settings, user, clash=False):
     """Render credentials for the two supported inbound transports."""
     proxies, links = [], []
     for network, port in [('xhttp', settings['xhttp_port']), ('tcp', settings['tcp_port'])]:
-        name = 'NL-XHTTP' if network == 'xhttp' else 'NL-Reality'
+        name = profile_name(settings, network)
         params = dict(encryption='none', security='reality', sni=settings['sni'],
                       fp='chrome', pbk=settings['public_key'], sid=settings['short_id'], type=network)
         proxy = dict(name=name, type='vless', server=settings['server'], port=port,
@@ -33,20 +55,21 @@ def render_subscription(settings, user, clash=False):
             proxy['alpn'] = ['h2']
         else:
             params['flow'] = proxy['flow'] = 'xtls-rprx-vision'
-        links.append(f"vless://{user['uuid']}@{settings['server']}:{port}?{urllib.parse.urlencode(params)}#{name}")
+        links.append(f"vless://{user['uuid']}@{settings['server']}:{port}?{urllib.parse.urlencode(params)}#{urllib.parse.quote(name, safe='')}")
         proxies.append(proxy)
     if not clash:
         return base64.b64encode(('\n'.join(links) + '\n').encode())
     # JSON is also valid YAML; no YAML dependency is needed.
     config = {'mixed-port': 7890, 'allow-lan': False, 'mode': 'rule', 'ipv6': False,
               'log-level': 'warning', 'proxies': proxies,
-              'proxy-groups': [{'name': 'VPN', 'type': 'select', 'proxies': [p['name'] for p in proxies]}],
+              'proxy-groups': [{'name': BRAND, 'type': 'select', 'proxies': [p['name'] for p in proxies]}],
               'dns': {'enable': True, 'enhanced-mode': 'fake-ip', 'fake-ip-range': '198.18.0.1/16',
-                      'nameserver': ['https://1.1.1.1/dns-query#VPN']},
+                      'nameserver': ['https://1.1.1.1/dns-query#' + BRAND]},
               'rules': [f"IP-CIDR,{settings['server']}/32,DIRECT,no-resolve",
                         'IP-CIDR,10.0.0.0/8,DIRECT,no-resolve', 'IP-CIDR,172.16.0.0/12,DIRECT,no-resolve',
-                        'IP-CIDR,192.168.0.0/16,DIRECT,no-resolve', 'MATCH,VPN']}
-    return json.dumps(config, indent=2).encode()
+                        'IP-CIDR,192.168.0.0/16,DIRECT,no-resolve', 'MATCH,' + BRAND]}
+    # YAML parsers reject JSON surrogate escapes for emoji; emit real UTF-8.
+    return json.dumps(config, indent=2, ensure_ascii=False).encode('utf-8')
 
 
 def reconciled_config(config, users):
@@ -129,10 +152,29 @@ class Service:
     def links(self, user):
         base = self.settings['subscription_base'] + '/u/' + user['token']
         until = datetime.datetime.fromtimestamp(user['expires'], datetime.timezone.utc).strftime('%d.%m.%Y %H:%M UTC')
-        return ('Доступ до ' + until + '\n\nHapp / Hiddify / v2rayNG:\n' + base +
+        return (BRAND + '\n' + location(self.settings) + '\nДоступ до ' + until + '\n\nHapp / Hiddify / v2rayNG:\n' + base +
                 '\n\nFlClash (импорт по URL, режим Rule):\n' + base + '/clash' +
                 '\n\n/vless — прямые VLESS-ссылки (для владельца — также прежние личные профили).'
-                '\n\nСсылки личные: не публикуйте их. Сначала попробуйте профиль NL-XHTTP.')
+                '\n\nСсылки личные: не публикуйте их. Сначала выберите «Основной».')
+
+    def keyboard(self, uid):
+        rows = [['🔌 Подключить VPN', '🔑 VLESS-ссылки'], ['📅 Мой доступ', '🌍 Локации'],
+                ['📖 Как подключиться', '🏠 Главное меню']]
+        with self.lock:
+            if self.meta('owner_id') == str(uid):
+                rows += [['🎁 Пригласить на 30 дней', '👥 Пользователи'], ['⚙️ Управление доступом']]
+        return {'keyboard': [[{'text': t} for t in row] for row in rows],
+                'resize_keyboard': True, 'is_persistent': True, 'input_field_placeholder': 'Выберите действие'}
+
+    def menu(self, user, admin):
+        active = user and user['expires'] > time.time()
+        text = BRAND + '\n\n' + location(self.settings) + '\n' + ('✅ Доступ активен' if active else 'Нет активной подписки')
+        text += '\n\nНажмите «Подключить VPN», чтобы получить подписку для телефона, компьютера или ТВ.'
+        if not active:
+            text += '\nДля подключения нужно приглашение владельца.'
+        if admin:
+            text += '\n\nВы — владелец. Ниже доступны приглашения и управление пользователями.'
+        return text
 
     def handle(self, message, update_id=None):
         with self.lock, self.db:
@@ -149,7 +191,8 @@ class Service:
         uid = message.get('from', {}).get('id')
         if not isinstance(uid, int) or message['chat'].get('id') != uid:
             return None
-        parts = message.get('text', '').split()
+        raw = message.get('text', '').strip()
+        parts = BUTTONS.get(raw, raw).split()
         command = parts[0].split('@')[0] if parts else ''
         args = parts[1:]
         with self.lock:
@@ -160,7 +203,8 @@ class Service:
                     self.db.execute('INSERT OR IGNORE INTO users VALUES (?,?,?,?)',
                                     (uid, str(uuid.uuid4()), secrets.token_urlsafe(32), int(time.time()) + 365 * 86400))
                     self.sync()
-                    return 'Владелец привязан. /my — подписка; /help — управление.'
+                    user = self.db.execute('SELECT * FROM users WHERE id=?', (uid,)).fetchone()
+                    return 'Владелец привязан.\n\n' + self.menu(user, True)
             if command == '/start' and len(args) == 1:
                 invitation = self.db.execute('SELECT * FROM invites WHERE code=? AND expires>?',
                                             (args[0], int(time.time()))).fetchone()
@@ -177,9 +221,24 @@ class Service:
                     return self.links(self.db.execute('SELECT * FROM users WHERE id=?', (uid,)).fetchone())
             user = self.db.execute('SELECT * FROM users WHERE id=?', (uid,)).fetchone()
             admin = owner == str(uid)
+            if command in ('/menu', '/help') or (command == '/start' and not args):
+                return self.menu(user, admin)
+            if command == '/locations':
+                return BRAND + '\n\nДоступная локация: ' + location(self.settings) + '\n\n«Основной» и «Резервный» — два способа подключения к одному серверу. Начните с основного.'
+            if command == '/guide':
+                return ('Как подключить ' + BRAND + '\n\n1. Нажмите «Подключить VPN» и скопируйте ссылку для своего приложения.'
+                        '\n2. В Happ / Hiddify / v2rayNG добавьте подписку по URL. В FlClash используйте отдельную ссылку и режим Rule.'
+                        '\n3. Обновите подписку, выберите «' + location(self.settings) + ' | Основной» и подключитесь.'
+                        '\n\nНа Android TV используйте первую ссылку в Hiddify. Для разового импорта доступны «VLESS-ссылки».'
+                        '\n\nЕсли соединение не работает, попробуйте «Резервный». Не включайте одновременно два VPN на одном устройстве.')
+            if command == '/status':
+                if user and user['expires'] > time.time():
+                    until = datetime.datetime.fromtimestamp(user['expires'], datetime.timezone.utc).strftime('%d.%m.%Y %H:%M UTC')
+                    return BRAND + '\n\n✅ Доступ активен\nДо: ' + until + '\nЛокация: ' + location(self.settings)
+                return 'Нет активной подписки. Попросите владельца выдать приглашение.'
             if command == '/vless':
                 if admin and self.settings.get('owner_legacy_links'):
-                    return 'Прежние личные VLESS-ссылки владельца:\n\n' + '\n\n'.join(self.settings['owner_legacy_links'])
+                    return 'Ваши прежние ключи ' + BRAND + ' (изменилось только название):\n\n' + '\n\n'.join(branded_link(self.settings, link) for link in self.settings['owner_legacy_links'])
                 if user and user['expires'] > time.time():
                     self.sync()
                     return 'Ваши личные VLESS-ссылки:\n\n' + base64.b64decode(render_subscription(self.settings, user)).decode()
@@ -244,6 +303,7 @@ class Service:
                 self.send_header('Content-Type', 'text/plain; charset=utf-8')
                 self.send_header('Cache-Control', 'no-store')
                 self.send_header('profile-update-interval', '6')
+                self.send_header('profile-title', 'base64:' + base64.b64encode(BRAND.encode()).decode())
                 self.send_header('Content-Length', str(len(content)))
                 self.end_headers()
                 self.wfile.write(content)
@@ -268,7 +328,8 @@ class Service:
                             self.setmeta('offset', update['update_id'] + 1)
                         try:
                             self.api('sendMessage', chat_id=message['chat']['id'], text=response,
-                                     link_preview_options={'is_disabled': True})
+                                     link_preview_options={'is_disabled': True},
+                                     reply_markup=self.keyboard(message['chat']['id']))
                         except Exception as exc:
                             print('Reply failed:', type(exc).__name__, flush=True)
                     else:
