@@ -6,7 +6,7 @@ import unittest
 from urllib.parse import urlsplit, unquote
 from pathlib import Path
 from unittest.mock import patch
-from service import BRAND, Service, branded_link, reconciled_config, render_subscription
+from service import BRAND, Service, branded_link, reconciled_config, render_subscription, tv_token
 from provision import generate
 
 
@@ -108,6 +108,23 @@ class Tests(unittest.TestCase):
         self.owner()
         response = self.message(1, '/vless')
         self.assertEqual(response.count('vless://'), 2)
+
+    def test_tv_alias_matches_original_and_respects_revocation(self):
+        self.owner()
+        user = self.service.db.execute('SELECT * FROM users WHERE id=1').fetchone()
+        alias = tv_token(user['token'])
+        self.assertIn(alias, self.message(1, '📺 Телевизор'))
+        self.assertNotIn(alias, self.message(2, '/tv'))
+        self.assertEqual(self.service.subscription(alias), self.service.subscription(user['token']))
+        self.assertIsNone(self.service.subscription('tv-' + '0' * 24))
+        self.message(1, '/revoke 1')
+        self.assertIsNone(self.service.subscription(alias))
+        self.message(1, '/extend 1 30')
+        self.assertIsNone(self.service.subscription(alias))
+        new = self.service.db.execute('SELECT * FROM users WHERE id=1').fetchone()
+        self.assertIsNotNone(self.service.subscription(tv_token(new['token'])))
+        self.service.db.execute('UPDATE users SET expires=0')
+        self.assertIsNone(self.service.subscription(tv_token(new['token'])))
 
     def test_menu_buttons_preserve_authorization(self):
         self.owner()

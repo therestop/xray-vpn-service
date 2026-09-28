@@ -8,7 +8,7 @@ from service import BRAND, Service
 def configure(service):
     commands = [{'command': command, 'description': description} for command, description in [
         ('menu', 'Главное меню'), ('my', 'Подключить VPN'), ('vless', 'Прямые VLESS-ссылки'),
-        ('status', 'Мой доступ'), ('locations', 'Доступные локации'), ('guide', 'Как подключиться')]]
+        ('tv', 'Подключить телевизор'), ('status', 'Мой доступ'), ('locations', 'Доступные локации'), ('guide', 'Как подключиться')]]
     service.api('setMyName', name=BRAND)
     service.api('setMyName', name=BRAND, language_code='ru')
     service.api('setMyDescription', description='Skachkov VPN — личный доступ к VPN. Подключение телефона, компьютера и ТВ. Вход по приглашению владельца.')

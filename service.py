@@ -2,6 +2,7 @@
 import base64
 import copy
 import datetime
+import hashlib
 import http.server
 import json
 import os
@@ -18,13 +19,18 @@ import uuid
 BRAND = 'Skachkov VPN'
 BUTTONS = {'🔌 Подключить VPN': '/my', '🔑 VLESS-ссылки': '/vless',
            '📅 Мой доступ': '/status', '🌍 Локации': '/locations',
-           '📖 Как подключиться': '/guide', '🏠 Главное меню': '/menu',
+           '📖 Как подключиться': '/guide', '🏠 Главное меню': '/menu', '📺 Телевизор': '/tv',
            '🎁 Пригласить на 30 дней': '/invite 30', '👥 Пользователи': '/users',
            '⚙️ Управление доступом': '/admin'}
 
 
 def location(settings):
     return settings.get('location_label', '🇳🇱 Нидерланды')
+
+
+def tv_token(token):
+    # 96-bit alias, derived from the revocable random subscription credential.
+    return 'tv-' + hashlib.sha256(token.encode('utf-8')).hexdigest()[:24]
 
 
 def profile_name(settings, network):
@@ -154,12 +160,13 @@ class Service:
         until = datetime.datetime.fromtimestamp(user['expires'], datetime.timezone.utc).strftime('%d.%m.%Y %H:%M UTC')
         return (BRAND + '\n' + location(self.settings) + '\nДоступ до ' + until + '\n\nHapp / Hiddify / v2rayNG:\n' + base +
                 '\n\nFlClash (импорт по URL, режим Rule):\n' + base + '/clash' +
+                '\n\n📺 Для телевизора: нажмите «Телевизор» или /tv — короткая ссылка для ввода пультом.'
                 '\n\n/vless — прямые VLESS-ссылки (для владельца — также прежние личные профили).'
                 '\n\nСсылки личные: не публикуйте их. Сначала выберите «Основной».')
 
     def keyboard(self, uid):
         rows = [['🔌 Подключить VPN', '🔑 VLESS-ссылки'], ['📅 Мой доступ', '🌍 Локации'],
-                ['📖 Как подключиться', '🏠 Главное меню']]
+                ['📺 Телевизор', '📖 Как подключиться'], ['🏠 Главное меню']]
         with self.lock:
             if self.meta('owner_id') == str(uid):
                 rows += [['🎁 Пригласить на 30 дней', '👥 Пользователи'], ['⚙️ Управление доступом']]
@@ -221,6 +228,15 @@ class Service:
                     return self.links(self.db.execute('SELECT * FROM users WHERE id=?', (uid,)).fetchone())
             user = self.db.execute('SELECT * FROM users WHERE id=?', (uid,)).fetchone()
             admin = owner == str(uid)
+            if command == '/tv':
+                if not user or user['expires'] <= time.time():
+                    return 'Нет активной подписки. Попросите владельца выдать приглашение.'
+                url = self.settings['subscription_base'] + '/u/' + tv_token(user['token'])
+                return (BRAND + ' · Hiddify на ТВ\n\n' + url +
+                        '\n\nВ Hiddify выберите добавление по ссылке. Скопируйте только строку https://… без пробелов.'
+                        '\nВ коротком коде используются только цифры и маленькие буквы a–f.'
+                        '\nПосле добавления выберите «' + location(self.settings) + ' | Основной».'
+                        '\n\nСсылка личная и действует до окончания вашей подписки.')
             if command in ('/menu', '/help') or (command == '/start' and not args):
                 return self.menu(user, admin)
             if command == '/locations':
@@ -282,6 +298,9 @@ class Service:
         with self.lock:
             row = self.db.execute('SELECT * FROM users WHERE token=? AND expires>?',
                                   (token, int(time.time()))).fetchone()
+            if row is None and len(token) == 27 and token.startswith('tv-'):
+                row = next((candidate for candidate in self.db.execute('SELECT * FROM users WHERE expires>?',
+                           (int(time.time()),)) if secrets.compare_digest(tv_token(candidate['token']), token)), None)
             return render_subscription(self.settings, row, clash) if row else None
 
     def serve(self):
