@@ -49,9 +49,10 @@ def render_subscription(settings, user, clash=False):
     proxies, links = [], []
     for network, port in [('xhttp', settings['xhttp_port']), ('tcp', settings['tcp_port'])]:
         name = profile_name(settings, network)
+        server = settings.get('backup_server', settings['server']) if network == 'tcp' else settings['server']
         params = dict(encryption='none', security='reality', sni=settings['sni'],
                       fp='chrome', pbk=settings['public_key'], sid=settings['short_id'], type=network)
-        proxy = dict(name=name, type='vless', server=settings['server'], port=port,
+        proxy = dict(name=name, type='vless', server=server, port=port,
                      uuid=user['uuid'], tls=True, udp=True, servername=settings['sni'],
                      network=network, **{'client-fingerprint': 'chrome', 'reality-opts': {
                          'public-key': settings['public_key'], 'short-id': settings['short_id']}})
@@ -61,7 +62,7 @@ def render_subscription(settings, user, clash=False):
             proxy['alpn'] = ['h2']
         else:
             params['flow'] = proxy['flow'] = 'xtls-rprx-vision'
-        links.append(f"vless://{user['uuid']}@{settings['server']}:{port}?{urllib.parse.urlencode(params)}#{urllib.parse.quote(name, safe='')}")
+        links.append(f"vless://{user['uuid']}@{server}:{port}?{urllib.parse.urlencode(params)}#{urllib.parse.quote(name, safe='')}")
         proxies.append(proxy)
     if not clash:
         return base64.b64encode(('\n'.join(links) + '\n').encode())
@@ -71,7 +72,8 @@ def render_subscription(settings, user, clash=False):
               'proxy-groups': [{'name': BRAND, 'type': 'select', 'proxies': [p['name'] for p in proxies]}],
               'dns': {'enable': True, 'enhanced-mode': 'fake-ip', 'fake-ip-range': '198.18.0.1/16',
                       'nameserver': ['https://1.1.1.1/dns-query#' + BRAND]},
-              'rules': [f"IP-CIDR,{settings['server']}/32,DIRECT,no-resolve",
+              'rules': [f"IP-CIDR,{host}/32,DIRECT,no-resolve" for host in
+                        dict.fromkeys([settings['server'], settings.get('backup_server', settings['server'])])] + [
                         'IP-CIDR,10.0.0.0/8,DIRECT,no-resolve', 'IP-CIDR,172.16.0.0/12,DIRECT,no-resolve',
                         'IP-CIDR,192.168.0.0/16,DIRECT,no-resolve', 'MATCH,' + BRAND]}
     # YAML parsers reject JSON surrogate escapes for emoji; emit real UTF-8.
@@ -254,7 +256,7 @@ class Service:
                 return 'Нет активной подписки. Попросите владельца выдать приглашение.'
             if command == '/vless':
                 if admin and self.settings.get('owner_legacy_links'):
-                    return 'Ваши прежние ключи ' + BRAND + ' (изменилось только название):\n\n' + '\n\n'.join(branded_link(self.settings, link) for link in self.settings['owner_legacy_links'])
+                    return 'Ваши прежние ключи ' + BRAND + ' (актуальные адреса подключения):\n\n' + '\n\n'.join(branded_link(self.settings, link) for link in self.settings['owner_legacy_links'])
                 if user and user['expires'] > time.time():
                     self.sync()
                     return 'Ваши личные VLESS-ссылки:\n\n' + base64.b64decode(render_subscription(self.settings, user)).decode()

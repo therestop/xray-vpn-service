@@ -30,6 +30,16 @@ class Tests(unittest.TestCase):
     def owner(self):
         self.message(1, '/start ' + self.settings['bootstrap_code'])
 
+    def test_distinct_backup_address(self):
+        self.settings['backup_server'] = '192.0.2.2'
+        user = {'uuid': 'test-user'}
+        config = json.loads(render_subscription(self.settings, user, clash=True))
+        self.assertEqual([p['server'] for p in config['proxies']], ['192.0.2.1', '192.0.2.2'])
+        for host in ['192.0.2.1', '192.0.2.2']:
+            self.assertIn(f'IP-CIDR,{host}/32,DIRECT,no-resolve', config['rules'])
+        links = base64.b64decode(render_subscription(self.settings, user)).decode().splitlines()
+        self.assertEqual([urlsplit(link).hostname for link in links], ['192.0.2.1', '192.0.2.2'])
+
     def test_owner_requires_code_and_private_chat(self):
         self.message(2, '/start wrong')
         self.message(2, '/start ' + self.settings['bootstrap_code'], 'group')

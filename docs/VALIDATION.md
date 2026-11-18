@@ -30,3 +30,6 @@
 - Исправлена ошибка импорта `yaml: found invalid Unicode character escape code`: JSON/YAML экспортирует флаги настоящими UTF-8 символами вместо суррогатных JSON escape-последовательностей.
 - Полученный по HTTPS профиль действующего владельца успешно проверен Mihomo 1.19.31.
 - Оба варианта профиля передают трафик через контрольный SSH-туннель с выходом через VPN-сервер. Обычный путь с активным системным Browsec на ПК не проходит TLS handshake; это отдельная проблема маршрута, не ошибка формата подписки. Прямой тест без Browsec ещё требуется.
+
+
+2026-11-18: 14 unit tests pass, including distinct primary/backup IP exports and both direct-route exceptions. Deployment verified: trusted HTTPS subscriptions on both new addresses, two profiles in exports, and successful internet requests through each profile over the physical home-network adapter. Credentials and expiry dates preserved.
